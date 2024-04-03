@@ -8,18 +8,21 @@ from rclpy.node import Node
 import geometry_msgs.msg
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import OccupancyGrid
-from nav2_msgs.msg import ParticleCloud
+from nav2_msgs.msg import ParticleCloud, Particle
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 from tf2_ros.transform_broadcaster import TransformBroadcaster
+import tf2_py as tf2
 from geometry_msgs.msg import TransformStamped, Vector3, Quaternion, Transform
 from pyquaternion import Quaternion as PyQuaternion
-import tf2_geometry_msgs
 from sensor_msgs_py import point_cloud2
 from laser_geometry import LaserProjection
 from scipy.spatial import KDTree
 from nav_msgs.srv import GetMap
 from std_msgs.msg import Header
+from math import sin, cos, atan2
+from copy import deepcopy
+from time import time
 
 
 class ParticleEstimationNode(Node):
@@ -34,15 +37,13 @@ class ParticleEstimationNode(Node):
         self.get_logger().info('Service available, sending request...')
         self.send_request()
 
-
-        self.poses = []
         self.delta_time = 1.0
 
         # Reference particle cloud
         self.particles_cloud_ref = None
 
         # Initialize particles
-        self.N_init_particles = 100
+        self.N_init_particles = 50
         self.particle_cloud = ParticleCloud()
 
         # Set the header
@@ -54,11 +55,11 @@ class ParticleEstimationNode(Node):
         self.particle_cloud.particles = []
 
         for i in range(self.N_init_particles):
-            p = geometry_msgs.msg.Pose()
-            p.position.x = np.random.uniform(-0.2, 0.2)
-            p.position.y = np.random.uniform(-0.2, 0.2)
-            p.orientation.z = np.random.uniform(-np.pi, np.pi)
-            p.orientation.w = 1.0
+            p = Particle()
+            p.pose.position.x = np.random.uniform(-0.2, 0.2)
+            p.pose.position.y = np.random.uniform(-0.2, 0.2)
+            p.pose.orientation.z = np.random.uniform(-np.pi, np.pi)
+            p.weight = 1.0 / self.N_init_particles
             self.particle_cloud.particles.append(p)
 
         # Other variables
@@ -147,22 +148,39 @@ class ParticleEstimationNode(Node):
         The vehicle only has forward/backward motion with an angle
             cmd_vel.linear.x in m/s
             cmd_vel.angular.z in rad/s
-        This function should return the transformation matrix T
         """
-        # Create a TransformStamped object
-        T = TransformStamped()
-
-        # Set the translation
-        T.transform.translation = Vector3(x=cmd_vel.linear.x * self.delta_time, y=0., z=0.)
-
-        # Set the rotation
-        quaternion = PyQuaternion(axis=[0, 0, 1], angle=cmd_vel.angular.z * self.delta_time)
-        T.transform.rotation = Quaternion(w=quaternion.w, x=quaternion.x, y=quaternion.y, z=quaternion.z)
-        
         # Update all the particles
         for i in range(len(self.particle_cloud.particles)):
-            self.particle_cloud.particles[i] = tf2_geometry_msgs.do_transform_pose(self.particle_cloud.particles[i], T)
+            # Get a copy of the current particle pose
+            particle_pose = deepcopy(self.particle_cloud.particles[i].pose)
 
+            # Convert quaternion to euler for easier calculations
+            yaw = self.angle_from_quaternion(particle_pose.orientation)
+
+            # Add noise to the particle pose
+            particle_pose.position.x += np.random.normal(0, 0.02)
+            particle_pose.position.y += np.random.normal(0, 0.02)
+            yaw += np.random.normal(0, 0.02)
+
+            # Update the particle pose
+            particle_pose.position.x += cmd_vel.linear.x * cos(yaw) * self.delta_time
+            particle_pose.position.y += cmd_vel.linear.x * sin(yaw) * self.delta_time
+            yaw += cmd_vel.angular.z * self.delta_time            
+
+            # Normalize the yaw angle
+            yaw = atan2(sin(yaw), cos(yaw))
+
+            # Convert the yaw back to a quaternion
+            quaternion = PyQuaternion(axis=[0, 0, 1], radians=yaw)
+            particle_pose.orientation = Quaternion(x=quaternion.x, y=quaternion.y, z=quaternion.z, w=quaternion.w)
+
+            # Create a new particle with the updated pose
+            particle = Particle()
+            particle.pose = particle_pose
+            particle.weight = self.particle_cloud.particles[i].weight
+
+            # Replace the old particle with the new one
+            self.particle_cloud.particles[i] = particle
 
     def scan_callback(self, msg):
         laser_proj = LaserProjection()
@@ -170,7 +188,7 @@ class ParticleEstimationNode(Node):
 
     def point_cloud2_to_array(self, cloud):
         reading = [list(p) for p in point_cloud2.read_points(cloud, field_names=("x", "y"), skip_nans=True)]
-        return np.array(reading)    
+        return np.array(reading)
 
     def compare_scans(self, laser_points, map):
         # Create a KDTree from the map points
@@ -185,39 +203,38 @@ class ParticleEstimationNode(Node):
 
 
     def sensor_update(self, laser_scan, map):
-        weights = np.zeros(len(self.particle_cloud.particles))
-        for i in range(len(self.particle_cloud.particles)):
+        num_particles = len(self.particle_cloud.particles)
+        weights = np.zeros(num_particles)
+
+        # Convert laser scan to 2D array once, not for each particle
+        laser_scan_2D = self.point_cloud2_to_array(laser_scan)
+
+        for i in range(num_particles):
             # Get the particle
-            p = self.particle_cloud.particles[i]
+            p = self.particle_cloud.particles[i].pose
 
-            # Transform the laser scan data according to the particle's pose
-            laser_scan_2D = self.point_cloud2_to_array(laser_scan)
-
-            # Transform 2D laserscan given the particle pose
-            for j in range(len(laser_scan_2D)):
-                x = laser_scan_2D[j][0]
-                y = laser_scan_2D[j][1]
-                laser_scan_2D[j][0] = p.position.x + x * np.cos(p.orientation.z) - y * np.sin(p.orientation.z)
-                laser_scan_2D[j][1] = p.position.y + x * np.sin(p.orientation.z) + y * np.cos(p.orientation.z)
-            
-            # point_transform = self.pose_to_transform(p, 'frame_id')
-            # transformed_laser_scan = tf2_geometry_msgs.do_transform_vector3(laser_scan, point_transform)
+            # Compute yaw angle once for each particle
+            yaw = self.angle_from_quaternion(p.orientation)
+            x = laser_scan_2D[:, 0]
+            y = laser_scan_2D[:, 1]
+            transformed_x = p.position.x + x * np.cos(yaw) - y * np.sin(yaw)
+            transformed_y = p.position.y + x * np.sin(yaw) + y * np.cos(yaw)
 
             # Compute the weights
-            weights[i] = self.compare_scans(laser_scan_2D, map)
+            # TODO: Figure out why the map is negative
+            weights[i] = self.compare_scans(np.stack((transformed_x, transformed_y), axis=-1), -map)
 
         # Normalize the weights
-        weights = weights / np.sum(weights)
+        weights /= np.sum(weights)
 
         assert np.isclose(np.sum(weights), 1.0), "The weights should sum to 1"
         
         return weights
 
     def average_particles(self, particles, weights):
-        x = np.zeros((4, 1))
-        for i in range(len(particles)):
-            x += particles[i].reshape(-1, 1) * weights[i]
-
+        particles = np.array(particles)
+        weights = np.array(weights).reshape(-1, 1)
+        x = np.sum(particles * weights, axis=0)
         return x
     
     def update_particles(self, u, z):
@@ -240,6 +257,7 @@ class ParticleEstimationNode(Node):
 
         for i in indices:
             new_particle_cloud.particles.append(self.particle_cloud.particles[i])
+            new_particle_cloud.particles[-1].weight = weights[i]
         
         self.particle_cloud = new_particle_cloud
         return weights
@@ -249,31 +267,33 @@ class ParticleEstimationNode(Node):
 
     def extract_particles(self, particle_cloud, weights = None):
         # Extract relevant entities
-        particles = np.array([[p.position.x, p.position.y, p.orientation.z, p.orientation.w] for p in particle_cloud.particles])
+        particles = np.array([[p.pose.position.x, p.pose.position.y, self.angle_from_quaternion(p.pose.orientation)] for p in particle_cloud.particles])
         if not isinstance(weights, np.ndarray):
             weights = np.array([p.weight for p in particle_cloud.particles])
 
         return particles, weights
 
-    def angle_from_quaternion_zw(self, q):
-        q = q.reshape(-1)
-        r = Rot.from_quat([0.0, 0.0, q[2], q[3]])
+    def angle_from_quaternion(self, q):
+        # Needs an orientation from the pose message
+        r = Rot.from_quat([q.x, q.y, q.z, q.w])
         return r.as_euler('zyx')[0]
 
     def timed_callback(self):
         if self.particle_cloud is not None and self.laser_scan is not None and self.map is not None and self.velocity is not None:          
+            start_time = time()
             # Estimate position
             weights = self.update_particles(self.velocity, self.laser_scan)
             particles_array, weights_array = self.extract_particles(self.particle_cloud, weights=weights)
             self.position = self.average_particles(particles_array, weights_array)
             self.get_logger().info(f"""Estimated position our implementation: 
-                                   {self.position[0], self.position[1], self.angle_from_quaternion_zw(self.position)}
-                                   & number of particles: {len(self.particle_cloud.particles)}
-                                   """)
+                                   {self.position[0], self.position[1], self.position[2]}""")
             
             # TODO: Fix bug regard publishing the pointcloud
             # Publish the particle cloud
-            # self.particle_cloud_publisher.publish(self.particle_cloud)
+            self.particle_cloud_publisher.publish(self.particle_cloud)
+            end_time = time()
+            if end_time - start_time > self.delta_time:
+                self.get_logger().warn(f"Time taken: {end_time - start_time}")
 
             # particles_array, weights_array = self.extract_particles(self.particles_cloud_ref)
             # position_ref = self.average_particles(particles_array, weights_array)
