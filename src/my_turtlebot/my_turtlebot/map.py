@@ -98,9 +98,9 @@ class MapPublisher(Node):
         distances = np.array(laser_scan.ranges)
         
         # Remove inf values
-        inf_indices = np.isinf(distances)
-        distances = distances[~inf_indices]
-        angles = angles[~inf_indices]        
+        self.inf_indices = np.isinf(distances)
+        distances[self.inf_indices] = laser_scan.range_max 
+        self.inf_indices = np.where(self.inf_indices == True)[0]
         self.lidar_points = np.vstack((distances * np.cos(angles), distances * np.sin(angles))) # x, y
 
     def update_lidar_points(self):
@@ -122,18 +122,18 @@ class MapPublisher(Node):
             map_y = np.clip(map_y, 0, self.map.info.height - 1)
             robot_x = int((self.robot_pose.position.x - self.map.info.origin.position.x) / self.map.info.resolution)
             robot_y = int((self.robot_pose.position.y - self.map.info.origin.position.y) / self.map.info.resolution)
-            for x, y in zip(map_x, map_y):
-                self.map.data[y * self.map.info.width + x] += 2
-                self.map.data[y * self.map.info.width + x] = min(self.map.data[y * self.map.info.width + x], 100)
+            for idx, (x, y) in enumerate(zip(map_x, map_y)):
+                map_index = y * self.map.info.width + x     
+                if idx in self.inf_indices:
+                    self.map.data[map_index] = max(self.map.data[map_index] - 1, 0)
+                else:
+                    self.map.data[map_index] = min(self.map.data[map_index] + 2, 100)
                 # Update free cells in bresenham line to 0 or count down
                 for i, j in bresenham((robot_x, robot_y), (x, y))[:-1]:
                     if self.map.data[j * self.map.info.width + i] > 0:
                         self.map.data[j * self.map.info.width + i] -= 1
-                    else :
+                    else:
                         self.map.data[j * self.map.info.width + i] = 0
-
-        
-
 
 
     def publish_map(self):
