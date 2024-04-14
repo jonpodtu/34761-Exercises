@@ -14,6 +14,7 @@ import numpy as np
 from rclpy.qos import QoSProfile, DurabilityPolicy
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
+from my_turtlebot.utils import bresenham 
 
 class MapPublisher(Node):
     def __init__(self):
@@ -34,7 +35,7 @@ class MapPublisher(Node):
         self.map.header.frame_id = "map"
         self.map.header.stamp = self.get_clock().now().to_msg()
         # Create map and fill with 0
-        self.map.data = [0] * (self.map.info.width * self.map.info.height)
+        self.map.data = [-1] * (self.map.info.width * self.map.info.height)
 
         # Laser scan subscriber
         self.subscription = self.create_subscription(
@@ -84,8 +85,8 @@ class MapPublisher(Node):
         points2d = np.random.rand(self.map.info.height, self.map.info.width)
         idx_i, idx_j = np.where(points2d > 0.95)
         
-        for i, j in zip(idx_i, idx_j):
-            self.map.data[i * self.map.info.width + j] = 100
+        for i, j in zip(idx_i, idx_j): # Count instead of just setting to 100
+            self.map.data[i * self.map.info.width + j] +=1 if self.map.data[i * self.map.info.width + j] < 100 else 0
 
     def scan_callback(self, laser_scan):
         """
@@ -119,9 +120,21 @@ class MapPublisher(Node):
             map_y = np.floor(map_y).astype(int)
             map_x = np.clip(map_x, 0, self.map.info.width - 1)
             map_y = np.clip(map_y, 0, self.map.info.height - 1)
-            map_indices = map_y * self.map.info.width + map_x
-            for i in map_indices:
-                self.map.data[i] = 100
+            robot_x = int((self.robot_pose.position.x - self.map.info.origin.position.x) / self.map.info.resolution)
+            robot_y = int((self.robot_pose.position.y - self.map.info.origin.position.y) / self.map.info.resolution)
+            for x, y in zip(map_x, map_y):
+                self.map.data[y * self.map.info.width + x] += 2
+                self.map.data[y * self.map.info.width + x] = min(self.map.data[y * self.map.info.width + x], 100)
+                # Update free cells in bresenham line to 0 or count down
+                for i, j in bresenham((robot_x, robot_y), (x, y))[:-1]:
+                    if self.map.data[j * self.map.info.width + i] > 0:
+                        self.map.data[j * self.map.info.width + i] -= 1
+                    else :
+                        self.map.data[j * self.map.info.width + i] = 0
+
+        
+
+
 
     def publish_map(self):
         # Use np to fill the map with random values
