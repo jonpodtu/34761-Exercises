@@ -44,6 +44,7 @@ setup(
             'particle_estimation=my_turtlebot.particle_estimation:main',
             'particle_filter=my_turtlebot.particle_filter:main',
             'planner=my_turtlebot.planner:main',
+            'exploration=my_turtlebot.exploration:main',
         ],
     },
 )

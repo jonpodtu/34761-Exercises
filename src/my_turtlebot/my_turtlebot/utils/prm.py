@@ -85,8 +85,15 @@ class PRM:
         disk_radius = int(clearance / self.map_resolution)
 
         # Convert map_data to a 2D array
-        map_array = np.array(map_data).reshape((self.map_height, self.map_width))
+        map_array = np.array(self.map_data).reshape((self.map_height, self.map_width))
+
+        # Dilate map and make sure undicovered areas are not dilated
+        print(map_array)
+        undiscovered_area = np.where(map_array == -1)
+        print(f"Undiscovered area: {undiscovered_area}")
+        map_array[undiscovered_area] = 0
         dilated_map = dilation(map_array, disk(disk_radius))
+        dilated_map[undiscovered_area] = -1
 
         # Convert the dilated map back to a 1D array 
         self.map = dilated_map.ravel().tolist()
@@ -104,17 +111,28 @@ class PRM:
 
         return (x, y)
 
-    def generate_random_nodes(self):
+    def generate_random_nodes_old(self):
         for _ in range(self.num_nodes):
             collides = True
-            while collides:
-              x = np.random.randint(0, self.map_width)
-              y = np.random.randint(0, self.map_height)
-              # Check if nodes collides with obstacles
-              node = (x, y)
-              if not self.node_collides_obstacle(node):
-                collides = False
+            while collides: # Make sure the node is not inside an obstacle and only count it if it is not
+                x = np.random.randint(0, self.map_width)
+                y = np.random.randint(0, self.map_height)
+                # Check if nodes collides with obstacles
+                node = (x, y)
+                if not self.node_collides_obstacle(node):
+                    collides = False
             self.nodes.append(node)
+
+    def generate_random_nodes(self):
+        """
+        Generate nodes from valid points in the map.
+        """
+        valid_map_points = np.where(np.array(self.map) == 0)[0]
+        random_points = np.random.choice(valid_map_points, self.num_nodes)
+        for point in random_points:
+            x = point % self.map_width
+            y = point // self.map_width
+            self.nodes.append((x, y))
 
     def compute_edges(self):
         # Calculate the k-nearest neighbors, and store them for future use.
@@ -132,10 +150,11 @@ class PRM:
 
     def node_collides_obstacle(self, node):
         """
-        Check if the node collides with an obstacle in the map.
+        Check if the node collides with an obstacle in the map or is generated in undicovered map area (-1).
         """
         x, y = node
-        if self.map[y * self.map_width + x] > 0:
+        map_elem = self.map[y * self.map_width + x]
+        if map_elem > 20 or map_elem == -1:
             return True
         return False
 
@@ -148,11 +167,12 @@ class PRM:
 
     def add_start_and_goal(self, start, goal):
         if self.node_collides_obstacle(start):
-            print("Error: Starting point is not valid")
+            print(f"Error: Starting point is not valid, {start} with value {self.map[start[1] * self.map_width + start[0]]}")
             exit(-1)
 
         if self.node_collides_obstacle(goal):
             print("Error: Goal point is not valid")
+            print(f"Error: Starting point is not valid, {goal} with value {self.map[goal[1] * self.map_width + goal[0]]}")
             exit(-1)
 
         # Set start and goal positions, and add them to the nodes

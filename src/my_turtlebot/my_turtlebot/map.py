@@ -20,7 +20,7 @@ class MapPublisher(Node):
     def __init__(self):
         super().__init__('map_publisher_node')
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        self.map_publisher = self.create_publisher(OccupancyGrid, '/map2', qos)
+        self.map_publisher = self.create_publisher(OccupancyGrid, '/map', qos)
         self.tfb_ = TransformBroadcaster(self)
         self.map = OccupancyGrid()
         self.map.info.resolution = 0.05
