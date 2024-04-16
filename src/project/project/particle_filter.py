@@ -19,6 +19,7 @@ from std_msgs.msg import Header
 from tf2_ros.transform_broadcaster import TransformBroadcaster
 from project.utils import angle_from_quaternion
 from project.utils.laser import point_cloud2_to_array
+from project.utils.plot import plot_scans
 
 
 class ParticleEstimationNode(Node):
@@ -113,12 +114,12 @@ class ParticleEstimationNode(Node):
         response = future.result()
         self.map = self.occupancy_grid_to_array(response.map)
         self.get_logger().info('Received map')
-
+        
     def occupancy_grid_to_array(self, occupancy_grid: OccupancyGrid):
         # TODO: Review this function. This might be the reason why the map is negative.
         width = occupancy_grid.info.width
         height = occupancy_grid.info.height
-        data = np.array(occupancy_grid.data).reshape(height, width)
+        data = np.array(occupancy_grid.data).reshape(height, width).T
 
         # Get the indices of the cells that are occupied.
         # Here, we consider a cell to be occupied if its value is greater than 20.
@@ -126,12 +127,22 @@ class ParticleEstimationNode(Node):
 
         # Convert the indices to world coordinates
         resolution = occupancy_grid.info.resolution
-        origin_x = occupancy_grid.info.origin.position.x
-        origin_y = occupancy_grid.info.origin.position.y
 
-        occupied_points = resolution * occupied_cells + np.array([origin_x, origin_y])
+        # Get the transformation from the OccupancyGrid
+        origin = occupancy_grid.info.origin
+        translation = np.array([origin.position.x, origin.position.y])
+        theta = angle_from_quaternion(origin.orientation)
 
-        return occupied_points
+
+        # Apply rotation
+        rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)], 
+                                    [np.sin(theta), np.cos(theta)]])
+        rotated_points = np.dot(occupied_cells, rotation_matrix)
+
+        # Apply translation
+        translated_points = resolution * rotated_points + translation
+
+        return translated_points
 
     def cmd_vel_callback(self, msg):
         self.velocity = msg
@@ -188,13 +199,14 @@ class ParticleEstimationNode(Node):
         weight = 1.0 / np.mean(dist) # The weight is the inverse of the average distance
 
         return weight
-
+    
     def sensor_update(self, laser_scan, map):
         num_particles = len(self.particle_cloud.particles)
         weights = np.zeros(num_particles)
 
         # Convert laser scan to 2D array once, not for each particle
         laser_scan_2D = point_cloud2_to_array(laser_scan)
+        # plot_scans(laser_scan_2D, map, str(self.get_clock().now().nanoseconds))
 
         for i in range(num_particles):
             # Get the particle
@@ -208,8 +220,7 @@ class ParticleEstimationNode(Node):
             transformed_y = p.position.y + x * np.sin(yaw) + y * np.cos(yaw)
 
             # Compute the weights
-            # TODO: Figure out why the map is negative. IMPORTANT.
-            weights[i] = self.compare_scans(np.stack((transformed_x, transformed_y), axis=-1), -map)
+            weights[i] = self.compare_scans(np.stack((transformed_x, transformed_y), axis=-1), map)
 
         # Normalize the weights
         weights /= np.sum(weights)
