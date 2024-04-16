@@ -1,4 +1,5 @@
 import numpy as np
+from sensor_msgs_py import point_cloud2
 
 # Not implemented error
 class RaiseNotImplementedError(Exception):
@@ -27,3 +28,10 @@ def scan_to_points(self, laser_scan, is_2D = True):
         RaiseNotImplementedError("3D scan not implemented yet")
 
     return points
+
+def point_cloud2_to_array(cloud) -> np.array:
+    """
+    Takes the point cloud message and returns a numpy array with the points.
+    """
+    reading = [list(p) for p in point_cloud2.read_points(cloud, field_names=("x", "y"), skip_nans=True)]
+    return np.array(reading)

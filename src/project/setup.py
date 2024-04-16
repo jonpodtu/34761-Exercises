@@ -15,8 +15,8 @@ setup(
     zip_safe=True,
     maintainer='ubuntu',
     maintainer_email='jonpo@dtu.dk',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='Final project ros2 package for the course 34761 at DTU.',
+    license='Apache License 2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [

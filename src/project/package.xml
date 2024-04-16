@@ -3,9 +3,9 @@
 <package format="3">
   <name>project</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Final project ros2 package for the course 34761 at DTU.</description>
   <maintainer email="jonpo@dtu.dk">ubuntu</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache License 2.0</license>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
