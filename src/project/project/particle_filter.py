@@ -57,7 +57,8 @@ class ParticleEstimationNode(Node):
             p = Particle()
             p.pose.position.x = np.random.uniform(-0.2, 0.2)
             p.pose.position.y = np.random.uniform(-0.2, 0.2)
-            p.pose.orientation.z = np.random.uniform(-np.pi, np.pi)
+            # TODO: Change the orientation so it is guideded by initial rotation
+            p.pose.orientation.z = np.random.uniform(-np.pi/3, np.pi/3)
             p.weight = 1.0 / self.N_init_particles
             self.particle_cloud.particles.append(p)
 
@@ -102,6 +103,7 @@ class ParticleEstimationNode(Node):
         self.particle_cloud_publisher = self.create_publisher(ParticleCloud, '/particle_cloud_own', 10)
         self.timer = self.create_timer(self.delta_time, self.timed_callback)
 
+    # Map stuff
     def send_request(self):
         request = GetMap.Request()
         future = self.client.call_async(request)
@@ -160,6 +162,7 @@ class ParticleEstimationNode(Node):
             yaw += cmd_vel.angular.z * self.delta_time            
 
             # Normalize the yaw angle
+            # TODO: Why do we need to do this?
             yaw = atan2(sin(yaw), cos(yaw))
 
             # Convert the yaw back to a quaternion
@@ -238,7 +241,7 @@ class ParticleEstimationNode(Node):
         weights = self.sensor_update(z, self.map)
         
         # Resampling
-        indices = np.random.choice(np.arange(len(self.particle_cloud.particles)), size=len(self.particle_cloud.particles), p=weights)
+        indices = np.random.choice(np.arange(len(self.particle_cloud.particles)), size=self.N_init_particles, p=weights)
 
         for i in indices:
             new_particle_cloud.particles.append(self.particle_cloud.particles[i])
