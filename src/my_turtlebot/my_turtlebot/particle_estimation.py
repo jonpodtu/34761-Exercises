@@ -31,6 +31,8 @@ class ParticleEstimationNode(Node):
             qos  # QoS profile depth
         )
 
+        print("YAHOO")
+
         self.timer = self.create_timer(self.delta_time, self.timed_callback)
     
     def estimate_position(self, particles, weights):
@@ -40,8 +42,9 @@ class ParticleEstimationNode(Node):
         return x
 
     def particle_cloud_callback(self, msg):
+        print("KEEP GOING!")
         particle_cloud = msg
-
+        print("msg")
         # Extract relevant entities
         self.particles = np.array([[p.pose.position.x, p.pose.position.y, self.angle_from_quaternion(p.pose.orientation)] for p in particle_cloud.particles])
         self.weights = np.array([p.weight for p in particle_cloud.particles])
@@ -52,15 +55,22 @@ class ParticleEstimationNode(Node):
         return r.as_euler('zyx')[0]
 
     def timed_callback(self):
+        print("ENTERING TIMER!")
+        print(self.particles)
         if self.particles is not None:
             self.get_logger().info(f"Number of particles: {len(self.particles)}")
+            print(f"Number of particles: {len(self.particles)}")
             
             # Estimate position
             self.position = self.estimate_position(self.particles, self.weights)
             self.get_logger().info(f"Estimated position: {self.position[0], self.position[1], self.position[2]}")
+            print(f"Estimated position: {self.position[0], self.position[1], self.position[2]}")
 
 def main(args=None):
+    print("STARTING ESTIMATION!")
     rclpy.init()
+    print("CONTINUING ESTIMATION")
     node = ParticleEstimationNode()
     rclpy.spin(node)
+    print("NODE SPINNING")
     rclpy.shutdown()

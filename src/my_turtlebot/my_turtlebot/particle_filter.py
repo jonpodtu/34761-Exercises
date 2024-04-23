@@ -97,10 +97,11 @@ class ParticleEstimationNode(Node):
             10
         )
 
-        ############################
-        # Particle cloud publisher #
-        ############################
+        ##########################################
+        # Particle cloud  and positoin publisher #
+        ##########################################
         self.particle_cloud_publisher = self.create_publisher(ParticleCloud, '/particle_cloud_own', 10)
+        self.position_publisher = self.create_publisher(geometry_msgs.msg.Pose, '/particle_position_own', 10)
 
         self.timer = self.create_timer(self.delta_time, self.timed_callback)
 
@@ -285,12 +286,14 @@ class ParticleEstimationNode(Node):
             weights = self.update_particles(self.velocity, self.laser_scan)
             particles_array, weights_array = self.extract_particles(self.particle_cloud, weights=weights)
             self.position = self.average_particles(particles_array, weights_array)
+            print(self.position) # Debug print statement
             self.get_logger().info(f"""Estimated position our implementation: 
                                    {self.position[0], self.position[1], self.position[2]}""")
             
             # TODO: Fix bug regard publishing the pointcloud
             # Publish the particle cloud
             self.particle_cloud_publisher.publish(self.particle_cloud)
+            self.position_publisher.publish(self.position)
             end_time = time()
             if end_time - start_time > self.delta_time:
                 self.get_logger().warn(f"Time taken: {end_time - start_time}")
