@@ -4,6 +4,7 @@ from time import time
 
 import geometry_msgs.msg
 import numpy as np
+import math
 import rclpy
 from geometry_msgs.msg import Quaternion
 from laser_geometry import LaserProjection
@@ -17,10 +18,8 @@ from scipy.spatial import KDTree
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from tf2_ros.transform_broadcaster import TransformBroadcaster
-from project.utils import angle_from_quaternion
+from project.utils import angle_from_quaternion, get_pose_from_position
 from project.utils.laser import point_cloud2_to_array
-from project.utils.plot import plot_scans
-
 
 class ParticleEstimationNode(Node):
     def __init__(self):
@@ -102,6 +101,7 @@ class ParticleEstimationNode(Node):
         # Particle cloud publisher #
         ############################
         self.particle_cloud_publisher = self.create_publisher(ParticleCloud, '/particle_cloud_own', 10)
+        self.publisher_ = self.create_publisher(geometry_msgs.msg.Pose, '/particle_estimation_own', 10)
         self.timer = self.create_timer(self.delta_time, self.timed_callback)
 
     # Map stuff
@@ -274,25 +274,27 @@ class ParticleEstimationNode(Node):
         return particles, weights
 
     def timed_callback(self):
-        if self.particle_cloud is not None and self.laser_scan is not None and self.map is not None and self.velocity is not None:          
-            start_time = time()
-            # Estimate position
-            weights = self.update_particles(self.velocity, self.laser_scan)
-            particles_array, weights_array = self.extract_particles(self.particle_cloud, weights=weights)
-            self.position = self.average_particles(particles_array, weights_array)
-            self.get_logger().info(f"Position: {self.position[0], self.position[1], self.position[2]}")
-            
-            # Publish the particle cloud
-            self.particle_cloud_publisher.publish(self.particle_cloud)
-            end_time = time()
-            if end_time - start_time > self.delta_time:
-                self.get_logger().warn(f"""Time taken: {end_time - start_time}. 
-                                       The computation is taking too long since the delta time is {self.delta_time}.
-                                       Consider increasing the delta time or optimizing the code.""")
-
-            # particles_array, weights_array = self.extract_particles(self.particles_cloud_ref)
-            # position_ref = self.average_particles(particles_array, weights_array)
-            # self.get_logger().info(f"Estimated position our implementation: {position_ref[0], position_ref[1], angle_from_quaternion_zw(position_ref)}")
+        if self.particle_cloud is not None and self.laser_scan is not None and self.map is not None and self.velocity is not None:  
+            # Check if the robot is moving
+            if math.isclose(self.velocity.linear.x, 0.0, rel_tol=1e-5) and math.isclose(self.velocity.angular.z, 0.0, rel_tol=1e-5):
+                self.get_logger().info("Robot is not moving. Not updating particles.")
+            else:
+                start_time = time()
+                # Estimate position
+                weights = self.update_particles(self.velocity, self.laser_scan)
+                particles_array, weights_array = self.extract_particles(self.particle_cloud, weights=weights)
+                self.position = self.average_particles(particles_array, weights_array)
+                self.get_logger().info(f"Position: {self.position[0], self.position[1], self.position[2]}")
+                
+                # Publish the particle cloud
+                self.particle_cloud_publisher.publish(self.particle_cloud)
+                end_time = time()
+                if end_time - start_time > self.delta_time:
+                    self.get_logger().warn(f"""Time taken: {end_time - start_time}. 
+                                        The computation is taking too long since the delta time is {self.delta_time}.
+                                        Consider increasing the delta time or optimizing the code.""")
+                pose = get_pose_from_position(self.position, self.position[2])
+                self.publisher_.publish(pose)
         else:
             self.get_logger().info("Waiting for data. The following is missing:")
             if self.particle_cloud is None:
