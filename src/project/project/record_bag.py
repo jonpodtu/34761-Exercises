@@ -3,7 +3,7 @@ import signal
 import sys
 
 
-# ros2 bag record -o /odom /particle_estimation_stack /particle_estimation_own
+# ros2 bag record /odom /particle_estimation_stack /particle_estimation_own -o test1
 def signal_handler(sig, frame):
     print('Stopping the recording and exiting...')
     process.terminate()  # or process.kill() if terminate does not work

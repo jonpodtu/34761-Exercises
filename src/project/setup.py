@@ -21,6 +21,8 @@ setup(
     entry_points={
         'console_scripts': [
             'particle_filter=project.particle_filter:main',
+            'particle_estimation=project.particle_estimation:main',
+            'square=project.drive_square:main',
         ],
     },
 )
