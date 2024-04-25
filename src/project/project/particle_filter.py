@@ -6,7 +6,7 @@ import geometry_msgs.msg
 import numpy as np
 import math
 import rclpy
-from geometry_msgs.msg import Quaternion
+from geometry_msgs.msg import Quaternion, PoseWithCovarianceStamped
 from laser_geometry import LaserProjection
 from nav2_msgs.msg import Particle, ParticleCloud
 from nav_msgs.msg import OccupancyGrid
@@ -23,7 +23,7 @@ from project.utils.laser import point_cloud2_to_array
 
 class ParticleEstimationNode(Node):
     def __init__(self):
-        super().__init__('particle_estimation_node')
+        super().__init__('particle_filter')
 
         # MAP SETTINGS
         # This is the service that will provide us with the map. It stalls until the map is available.
@@ -41,7 +41,7 @@ class ParticleEstimationNode(Node):
         self.particles_cloud_ref = None
 
         # Initialize particles
-        self.N_init_particles = 50
+        self.N_init_particles = 100
         self.particle_cloud = ParticleCloud()
 
         # Set the header
@@ -101,7 +101,7 @@ class ParticleEstimationNode(Node):
         # Particle cloud publisher #
         ############################
         self.particle_cloud_publisher = self.create_publisher(ParticleCloud, '/particle_cloud_own', 10)
-        self.publisher_ = self.create_publisher(geometry_msgs.msg.Pose, '/particle_estimation_own', 10)
+        self.publisher_ = self.create_publisher(PoseWithCovarianceStamped, '/particle_estimation_own', 10)
         self.timer = self.create_timer(self.delta_time, self.timed_callback)
 
     # Map stuff
@@ -272,8 +272,11 @@ class ParticleEstimationNode(Node):
             weights = np.array([p.weight for p in particle_cloud.particles])
 
         return particles, weights
+    
+
 
     def timed_callback(self):
+        timestamp = self.get_clock().now().to_msg()
         if self.particle_cloud is not None and self.laser_scan is not None and self.map is not None and self.velocity is not None:  
             # Check if the robot is moving
             if math.isclose(self.velocity.linear.x, 0.0, rel_tol=1e-5) and math.isclose(self.velocity.angular.z, 0.0, rel_tol=1e-5):
@@ -284,8 +287,10 @@ class ParticleEstimationNode(Node):
                 weights = self.update_particles(self.velocity, self.laser_scan)
                 particles_array, weights_array = self.extract_particles(self.particle_cloud, weights=weights)
                 self.position = self.average_particles(particles_array, weights_array)
+                self.covariance = np.cov(particles_array.T, aweights=weights_array)
                 self.get_logger().info(f"Position: {self.position[0], self.position[1], self.position[2]}")
-                
+                self.get_logger().info(f"Covariance: {self.covariance}")
+
                 # Publish the particle cloud
                 self.particle_cloud_publisher.publish(self.particle_cloud)
                 end_time = time()
@@ -293,8 +298,16 @@ class ParticleEstimationNode(Node):
                     self.get_logger().warn(f"""Time taken: {end_time - start_time}. 
                                         The computation is taking too long since the delta time is {self.delta_time}.
                                         Consider increasing the delta time or optimizing the code.""")
-                pose = get_pose_from_position(self.position, self.position[2])
-                self.publisher_.publish(pose)
+
+
+                # Publish estimated position with covariance
+                pose_cov = PoseWithCovarianceStamped()
+                pose_cov.header.stamp = timestamp
+                pose_cov.pose.pose = get_pose_from_position(self.position, self.position[2])
+                covariance_pub = np.zeros((6, 6))
+                covariance_pub[:3, :3] = self.covariance
+                pose_cov.pose.covariance = covariance_pub.flatten().tolist()
+                self.publisher_.publish(pose_cov)
         else:
             self.get_logger().info("Waiting for data. The following is missing:")
             if self.particle_cloud is None:
@@ -309,7 +322,7 @@ class ParticleEstimationNode(Node):
 
 
 def main(args=None):
-    rclpy.init()
+    rclpy.init(args=args)
     node = ParticleEstimationNode()
     rclpy.spin(node)
     rclpy.shutdown()

@@ -15,7 +15,7 @@ class DriveSquareNode(Node):
         msg.linear.x = 0.0
         msg.angular.z = 0.0
         
-        if self.step <= 7:
+        if self.step <= 21:
             msg.linear.x = 0.2 if self.step % 2 == 0 else 0.0
             msg.angular.z = (np.pi / 2) / 5 if self.step % 2 == 1 else 0.0
         
