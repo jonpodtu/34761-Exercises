@@ -5,7 +5,7 @@
 import rclpy
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav2_msgs.msg import ParticleCloud
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
@@ -14,7 +14,7 @@ from project.utils import get_pose_from_position
 
 class ParticleEstimationNode(Node):
     def __init__(self):
-        super().__init__('particle_estimation_node')
+        super().__init__('particle_estimation')
         self.poses = []
         self.delta_time = 1.0
         self.particles = None
@@ -33,7 +33,7 @@ class ParticleEstimationNode(Node):
         )
 
         self.timer = self.create_timer(self.delta_time, self.timed_callback)
-        self.publisher_ = self.create_publisher(Pose, '/particle_estimation_stack', qos)
+        self.publisher_ = self.create_publisher(PoseWithCovarianceStamped, '/particle_estimation_stack', qos)
     
     def estimate_position(self, particles, weights):
         particles = np.array(particles)
@@ -55,18 +55,26 @@ class ParticleEstimationNode(Node):
 
     def timed_callback(self):
         if self.particles is not None:
+            timestamp = self.get_clock().now().to_msg()
             self.get_logger().info(f"Number of particles: {len(self.particles)}")
             
             # Estimate position
             self.position = self.estimate_position(self.particles, self.weights)
+            self.covariance = np.cov(self.particles.T, aweights=self.weights.T)
             self.get_logger().info(f"Estimated position: {self.position[0], self.position[1], self.position[2]}")
+            self.get_logger().info(f"Covariance: {self.covariance}")
 
-            # Publish estimated position
-            pose = get_pose_from_position(self.position, self.position[2])
-            self.publisher_.publish(pose)
+            # Publish estimated position with covariance
+            pose_cov = PoseWithCovarianceStamped()
+            pose_cov.header.stamp = timestamp
+            pose_cov.pose.pose = get_pose_from_position(self.position, self.position[2])
+            covariance_pub = np.zeros((6, 6))
+            covariance_pub[:3, :3] = self.covariance
+            pose_cov.pose.covariance = covariance_pub.flatten().tolist()
+            self.publisher_.publish(pose_cov)
 
 def main(args=None):
-    rclpy.init()
+    rclpy.init(args=args)
     node = ParticleEstimationNode()
     rclpy.spin(node)
     rclpy.shutdown()
