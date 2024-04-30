@@ -21,7 +21,7 @@ from tf2_ros.transform_broadcaster import TransformBroadcaster
 from project.utils import angle_from_quaternion, get_pose_from_position
 from project.utils.laser import point_cloud2_to_array
 
-class ParticleEstimationNode(Node):
+class ParticleFilterNode(Node):
     def __init__(self):
         super().__init__('particle_filter')
 
@@ -41,7 +41,7 @@ class ParticleEstimationNode(Node):
         self.particles_cloud_ref = None
 
         # Initialize particles
-        self.N_init_particles = 100
+        self.N_init_particles = 250
         self.particle_cloud = ParticleCloud()
 
         # Set the header
@@ -55,10 +55,9 @@ class ParticleEstimationNode(Node):
         # We initialize the particles in a small area around the origin.
         for i in range(self.N_init_particles):
             p = Particle()
-            p.pose.position.x = np.random.uniform(-0.2, 0.2)
-            p.pose.position.y = np.random.uniform(-0.2, 0.2)
-            # TODO: Change the orientation so it is guideded by initial rotation
-            p.pose.orientation.z = np.random.uniform(-np.pi/3, np.pi/3)
+            p.pose.position.x = np.random.uniform(-3, 3)
+            p.pose.position.y = np.random.uniform(-3, 3)
+            p.pose.orientation.z = np.random.uniform(-np.pi, np.pi)
             p.weight = 1.0 / self.N_init_particles
             self.particle_cloud.particles.append(p)
 
@@ -116,7 +115,6 @@ class ParticleEstimationNode(Node):
         self.get_logger().info('Received map')
         
     def occupancy_grid_to_array(self, occupancy_grid: OccupancyGrid):
-        # TODO: Review this function. This might be the reason why the map is negative.
         width = occupancy_grid.info.width
         height = occupancy_grid.info.height
         data = np.array(occupancy_grid.data).reshape(height, width).T
@@ -132,8 +130,7 @@ class ParticleEstimationNode(Node):
         origin = occupancy_grid.info.origin
         translation = np.array([origin.position.x, origin.position.y])
         theta = angle_from_quaternion(origin.orientation)
-
-
+        
         # Apply rotation
         rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)], 
                                     [np.sin(theta), np.cos(theta)]])
@@ -273,8 +270,6 @@ class ParticleEstimationNode(Node):
 
         return particles, weights
     
-
-
     def timed_callback(self):
         timestamp = self.get_clock().now().to_msg()
         if self.particle_cloud is not None and self.laser_scan is not None and self.map is not None and self.velocity is not None:  
@@ -323,6 +318,6 @@ class ParticleEstimationNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ParticleEstimationNode()
+    node = ParticleFilterNode()
     rclpy.spin(node)
     rclpy.shutdown()
